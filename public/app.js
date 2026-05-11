@@ -35,21 +35,36 @@ function renderResults(jobTitle, questions) {
 }
 
 async function generate(jobTitle) {
-  const res = await fetch("/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_title: jobTitle }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  let res;
+  try {
+    res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_title: jobTitle }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
-    let detail = `Request failed with status ${res.status}`;
+    let message = `Request failed with status ${res.status}`;
     try {
       const data = await res.json();
-      if (data && data.detail) detail = data.detail;
+      if (data && data.message) message = data.message;
+      else if (data && data.detail) message = data.detail;
     } catch {
       /* ignore JSON parse errors on error responses */
     }
-    throw new Error(detail);
+    throw new Error(message);
   }
 
   return res.json();

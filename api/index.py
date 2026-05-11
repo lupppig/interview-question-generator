@@ -1,26 +1,28 @@
+import asyncio
 import json
-import os
+import logging
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, Field
 
+from api.errors import ConfigurationError, UpstreamError, register_error_handlers
+from api.schemas import GenerateRequest, GenerateResponse, Settings
+
+GEMINI_TIMEOUT_SECONDS = 25
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
+logger = logging.getLogger("interview_generator")
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = PROJECT_ROOT / "public"
 MODEL_NAME = "gemini-2.5-flash"
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "public"
 
+settings = Settings()
 app = FastAPI(title="Interview Question Generator")
-
-
-class GenerateRequest(BaseModel):
-    job_title: str = Field(min_length=2, max_length=120)
-
-
-class GenerateResponse(BaseModel):
-    job_title: str
-    questions: list[str]
+register_error_handlers(app)
 
 
 def build_prompt(job_title: str) -> str:
@@ -37,41 +39,51 @@ def build_prompt(job_title: str) -> str:
 
 
 def get_client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not configured on the server.")
-    return genai.Client(api_key=api_key)
+    if not settings.gemini_api_key:
+        raise ConfigurationError("GEMINI_API_KEY is not set.")
+    return genai.Client(api_key=settings.gemini_api_key)
+
+
+def parse_questions(raw_text: str) -> list[str]:
+    try:
+        payload = json.loads(raw_text)
+        questions = [str(q).strip() for q in payload["questions"] if str(q).strip()]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise UpstreamError("AI response could not be parsed as JSON.") from exc
+
+    if len(questions) != 3:
+        raise UpstreamError("AI did not return exactly 3 questions.")
+    return questions
 
 
 @app.post("/api/generate", response_model=GenerateResponse)
-def generate(req: GenerateRequest) -> GenerateResponse:
+async def generate(req: GenerateRequest) -> GenerateResponse:
     job_title = req.job_title.strip()
-    if not job_title:
-        raise HTTPException(status_code=400, detail="Job title cannot be empty.")
-
     client = get_client()
+    logger.info("generate_request: job_title=%r", job_title)
 
-    try:
-        result = client.models.generate_content(
+    def _call_gemini():
+        return client.models.generate_content(
             model=MODEL_NAME,
             contents=build_prompt(job_title),
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.7,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI provider error: {exc}") from exc
 
     try:
-        payload = json.loads(result.text)
-        questions = [str(q).strip() for q in payload["questions"] if str(q).strip()]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise HTTPException(status_code=502, detail="AI response was not valid JSON.") from exc
+        result = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=GEMINI_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        logger.warning("gemini_call_timeout after %ss", GEMINI_TIMEOUT_SECONDS)
+        raise UpstreamError(f"AI provider timed out after {GEMINI_TIMEOUT_SECONDS}s.") from exc
+    except Exception as exc:
+        logger.exception("gemini_call_failed")
+        raise UpstreamError("The AI provider request failed.") from exc
 
-    if len(questions) != 3:
-        raise HTTPException(status_code=502, detail="AI did not return exactly 3 questions.")
-
+    logger.info("generate_response: chars=%d", len(result.text or ""))
+    questions = parse_questions(result.text or "")
     return GenerateResponse(job_title=job_title, questions=questions)
 
 

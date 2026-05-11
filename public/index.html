@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interview Question Generator</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="hero">
+        <h1>Interview Question Generator</h1>
+        <p class="subtitle">
+          Enter a job title and get three thoughtful, role-specific interview questions.
+        </p>
+      </header>
+
+      <form id="generate-form" class="card" autocomplete="off">
+        <label for="job-title">Job title</label>
+        <div class="input-row">
+          <input
+            id="job-title"
+            name="job-title"
+            type="text"
+            placeholder="e.g. Customer Success Manager"
+            value="Customer Success Manager"
+            required
+            minlength="2"
+            maxlength="120"
+          />
+          <button id="submit-btn" type="submit">Generate</button>
+        </div>
+        <p id="error" class="error" role="alert" hidden></p>
+      </form>
+
+      <section id="loading" class="card loading" hidden aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <span>Generating questions…</span>
+      </section>
+
+      <section id="results" class="card results" hidden aria-live="polite">
+        <h2 id="results-heading"></h2>
+        <ol id="questions-list"></ol>
+      </section>
+
+      <footer class="footer">
+        <span>Powered by Gemini 2.5 Flash</span>
+      </footer>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

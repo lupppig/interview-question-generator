@@ -24,7 +24,10 @@ FRONTEND_DIR = PROJECT_ROOT / "public"
 MODEL_NAME = "gemini-2.5-flash"
 
 settings = Settings()
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url if settings.redis_url else "memory://"
+)
 cache = QuestionCache(settings.redis_url, settings.cache_ttl_seconds)
 
 if not settings.gemini_api_key:

@@ -109,4 +109,7 @@ async def generate(request: Request, req: GenerateRequest) -> GenerateResponse:
     return GenerateResponse(job_title=job_title, questions=questions)
 
 
-app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="public")
+if FRONTEND_DIR.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="public")
+else:
+    logger.info("FRONTEND_DIR not found, skipping StaticFiles mount (expected on Vercel).")

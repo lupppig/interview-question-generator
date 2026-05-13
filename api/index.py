@@ -3,11 +3,14 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from google import genai
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from google.genai import types
 
+from api.cache import QuestionCache
 from api.errors import ConfigurationError, UpstreamError, register_error_handlers
 from api.schemas import GenerateRequest, GenerateResponse, Settings
 
@@ -21,8 +24,19 @@ FRONTEND_DIR = PROJECT_ROOT / "public"
 MODEL_NAME = "gemini-2.5-flash"
 
 settings = Settings()
+limiter = Limiter(key_func=get_remote_address)
+cache = QuestionCache(settings.redis_url, settings.cache_ttl_seconds)
+
+if not settings.gemini_api_key:
+    logger.warning("GEMINI_API_KEY is not set — requests will fail until it is configured.")
+    gemini_client: genai.Client | None = None
+else:
+    gemini_client = genai.Client(api_key=settings.gemini_api_key)
+
 app = FastAPI(title="Interview Question Generator")
+app.state.limiter = limiter
 register_error_handlers(app)
+logger.info("cache_enabled=%s", cache.enabled)
 
 
 def build_prompt(job_title: str) -> str:
@@ -39,9 +53,9 @@ def build_prompt(job_title: str) -> str:
 
 
 def get_client() -> genai.Client:
-    if not settings.gemini_api_key:
+    if gemini_client is None:
         raise ConfigurationError("GEMINI_API_KEY is not set.")
-    return genai.Client(api_key=settings.gemini_api_key)
+    return gemini_client
 
 
 def parse_questions(raw_text: str) -> list[str]:
@@ -57,24 +71,31 @@ def parse_questions(raw_text: str) -> list[str]:
 
 
 @app.post("/api/generate", response_model=GenerateResponse)
-async def generate(req: GenerateRequest) -> GenerateResponse:
+@limiter.limit("5/minute")
+async def generate(request: Request, req: GenerateRequest) -> GenerateResponse:
     job_title = req.job_title.strip()
-    client = get_client()
     logger.info("generate_request: job_title=%r", job_title)
 
-    def _call_gemini():
-        return client.models.generate_content(
-            model=MODEL_NAME,
-            contents=build_prompt(job_title),
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.7,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
+    cached = await cache.get(job_title)
+    if cached is not None:
+        logger.info("cache_hit: job_title=%r", job_title)
+        return GenerateResponse(job_title=job_title, questions=cached)
+
+    client = get_client()
 
     try:
-        result = await asyncio.wait_for(asyncio.to_thread(_call_gemini), timeout=GEMINI_TIMEOUT_SECONDS)
+        result = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=MODEL_NAME,
+                contents=build_prompt(job_title),
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.7,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
+            ),
+            timeout=GEMINI_TIMEOUT_SECONDS,
+        )
     except asyncio.TimeoutError as exc:
         logger.warning("gemini_call_timeout after %ss", GEMINI_TIMEOUT_SECONDS)
         raise UpstreamError(f"AI provider timed out after {GEMINI_TIMEOUT_SECONDS}s.") from exc
@@ -84,19 +105,8 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
 
     logger.info("generate_response: chars=%d", len(result.text or ""))
     questions = parse_questions(result.text or "")
+    await cache.set(job_title, questions)
     return GenerateResponse(job_title=job_title, questions=questions)
 
 
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
-
-
-@app.get("/styles.css")
-def styles() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "styles.css", media_type="text/css")
-
-
-@app.get("/app.js")
-def script() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "app.js", media_type="application/javascript")
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="public")

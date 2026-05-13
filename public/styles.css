@@ -1,8 +1,8 @@
 :root {
   --bg: #0f172a;
   --bg-gradient: radial-gradient(circle at 20% 0%, #1e293b 0%, #0f172a 55%, #020617 100%);
-  --card: rgba(255, 255, 255, 0.04);
-  --card-border: rgba(255, 255, 255, 0.08);
+  --card: #1e293b;
+  --card-border: #334155;
   --text: #e2e8f0;
   --muted: #94a3b8;
   --accent: #6366f1;
@@ -58,7 +58,6 @@ body {
   border-radius: var(--radius);
   padding: 24px;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(8px);
 }
 
 form label {
@@ -80,7 +79,7 @@ input[type="text"] {
   padding: 12px 14px;
   border-radius: 10px;
   border: 1px solid var(--card-border);
-  background: rgba(15, 23, 42, 0.6);
+  background: #0f172a;
   color: var(--text);
   font-size: 1rem;
   outline: none;

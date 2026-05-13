@@ -8,6 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     gemini_api_key: str = ""
+    redis_url: str = ""
+    cache_ttl_seconds: int = 60 * 60 * 24 * 7
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

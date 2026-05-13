@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.schemas import ErrorResponse
@@ -63,6 +64,11 @@ def register_error_handlers(app: FastAPI) -> None:
         first = exc.errors()[0] if exc.errors() else {}
         message = first.get("msg", "Invalid request payload.")
         return _error_response(422, "validation_error", message)
+
+    @app.exception_handler(RateLimitExceeded)
+    async def _handle_rate_limit(_: Request, exc: RateLimitExceeded) -> JSONResponse:
+        logger.warning("rate_limit_exceeded: %s", exc.detail)
+        return _error_response(429, "rate_limited", "Too many requests. Please try again later.")
 
     @app.exception_handler(StarletteHTTPException)
     async def _handle_http_exception(_: Request, exc: StarletteHTTPException) -> JSONResponse:

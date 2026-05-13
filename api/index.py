@@ -78,9 +78,10 @@ async def generate(request: Request, req: GenerateRequest) -> GenerateResponse:
 
     cached = await cache.get(job_title)
     if cached is not None:
-        logger.info("cache_hit: job_title=%r", job_title)
-        return GenerateResponse(job_title=job_title, questions=cached)
+        logger.info("cache_hit: type=%s job_title=%r", cached.hit_type, job_title)
+        return GenerateResponse(job_title=job_title, questions=cached.questions)
 
+    logger.info("cache_miss: job_title=%r", job_title)
     client = get_client()
 
     try:

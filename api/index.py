@@ -91,7 +91,6 @@ async def generate(request: Request, req: GenerateRequest) -> GenerateResponse:
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.7,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             ),
             timeout=GEMINI_TIMEOUT_SECONDS,
